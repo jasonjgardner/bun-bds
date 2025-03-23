@@ -1,15 +1,5 @@
-# mcbun
+# Bun backend for Bedrock Dedicated Server
 
-To install dependencies:
+### Not for Production
 
-```bash
-bun install
-```
-
-To run:
-
-```bash
-bun run index.ts
-```
-
-This project was created using `bun init` in bun v1.1.7. [Bun](https://bun.sh) is a fast all-in-one JavaScript runtime.
+This repository serves as a home for a Bun-powered BDS backend. It is not intended to be used as a library or without modification.
