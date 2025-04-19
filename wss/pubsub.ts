@@ -7,7 +7,7 @@ import type { SubscribeEvents } from "./types";
  */
 export function subscribe(
   socket: ServerWebSocket,
-  events: Array<string | SubscribeEvents>,
+  events: Array<"commandResponse" | SubscribeEvents>,
 ) {
   events.forEach((event) => {
     socket.send(JSON.stringify({

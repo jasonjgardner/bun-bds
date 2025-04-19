@@ -92,19 +92,4 @@ export type Axis = "x" | "y" | "z";
 export type WssState = {
   currentRequestIdx: number;
   updatePending?: boolean;
-  sendRate?: number;
-  offset?: [number, number, number];
-  useAbsolutePosition?: boolean;
-  axis?: Axis;
-  material?: string;
-  enableBlockHistory?: boolean;
-  blockHistory: Array<[number, number, number]>;
-  blockHistoryMaxLength: number;
-  functionLog?: string;
 };
-
-export interface WssParams {
-  parameters: URLSearchParams;
-  queueCommandRequest: (commandLine: string) => void;
-  state?: WssState;
-}

@@ -2,20 +2,11 @@ import type { Server, ServerWebSocket } from "bun";
 import { subscribe } from "./pubsub";
 import State from "./lib/state";
 import { startup } from "./lib/bootstrap";
-
-const COMMAND_SERVER = "http://localhost:8080/bds"
+import { processMcpMessage } from "./mcp-integration";
 
 let connectionUpdateInterval: NodeJS.Timer | null = null;
-
+const COMMAND_SERVER = "http://localhost:8080/api/database";
 export const state = new State();
-
-async function fetchCommands() {
-  const response = await fetch(COMMAND_SERVER);
-  if (!response.ok) {
-    throw new Error("Failed to fetch commands");
-  }
-  return await response.json();
-}
 
 async function processMessage(
   { message, sender }: { message: string; sender: string },
@@ -71,18 +62,18 @@ const server = Bun.serve({
     perMessageDeflate: true,
     open: (ws: ServerWebSocket) => {
       ws.subscribe("playerUpdates");
-      subscribe(ws, ["PlayerMessage", "commandResponse"]);
+      subscribe(ws, ["PlayerMessage", "commandResponse", "BlockPlaced"]);
 
       if (connectionUpdateInterval) {
         clearInterval(connectionUpdateInterval);
       }
       connectionUpdateInterval = setInterval(async() => {
-        let commandLine = state.getCurrentCommand();
+        let commandLine = await state.getCurrentCommand();
 
         if (!commandLine) {
           console.log("No command to send");
-          const { command } = await fetchCommands();
-          commandLine = command ?? "";
+          await state.loadCommands();
+          commandLine = await state.getCurrentCommand();
         }
 
         console.log(`Sending command: ${commandLine}`);
@@ -90,7 +81,7 @@ const server = Bun.serve({
         const content = JSON.stringify({
           header: {
             version: 1,
-            requestId: crypto.randomUUID(),
+            requestId: state.getCurrentUUID() ?? crypto.randomUUID(),
             messageType: "commandRequest",
             messagePurpose: "commandRequest",
           },
@@ -112,24 +103,59 @@ const server = Bun.serve({
     },
     message: async (ws: ServerWebSocket, msg: string) => {
       server.publish("playerUpdates", msg);
-      const data = JSON.parse(msg);
-      if (data.header.eventName === "PlayerMessage") {
-        const { message, sender } = data.body;
-        console.log(await processMessage({ message, sender }));
-      }
+      
+      try {
+        const data = JSON.parse(msg);
+        
+        // Handle regular Minecraft messages
+        if (data.header?.eventName === "PlayerMessage") {
+          const { message, sender } = data.body;
+          console.log(await processMessage({ message, sender }));
+        }
+        
+        // Handle MCP-specific messages from AI agents
+        if (data.type === "mcp" || data.header?.messagePurpose === "mcpRequest") {
+          console.log("Processing MCP message:", msg);
+          await processMcpMessage(msg);
+          return;
+        }
 
-      if (data.header.messagePurpose === "commandResponse") {
-        // Remove queue command from session storage, etc.
-        state.removeRequest();
-      }
+        if (data.header?.messagePurpose === "commandResponse") {
+          // Remove queue command from session storage, etc.
+          await state.removeRequest();
 
-      if (data.header.messagePurpose === "commandRequest") {
-        const { commandLine } = data.body;
-        respond(server, commandLine);
+          const uuid = data.header.requestId;
 
-        console.log(`Received command: ${commandLine}`);
+          await fetch(COMMAND_SERVER, {
+            method: "DELETE",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              uuid
+            }),
+          });
+          return;
+        }
+        
+        // Handle standard Minecraft command requests
+        if (data.header?.messagePurpose === "commandRequest") {
+          const { commandLine } = data.body;
+          respond(server, commandLine);
+          console.log(`Received command: ${commandLine}`);
+        }
+        
+        // Handle block placement events
+        if (data.header?.eventName === "BlockPlaced") {
+          const blockId = `${data.body.block.namespace}:${data.body.block.id}`;
+          const { x, y, z } = data.body.player.position;
+          console.log(`Block placed: ${blockId}`);
+          console.log(`Player position: x=${x}, y=${y}, z=${z}`);
+        }
+      } catch (error) {
+        console.error("Error processing WebSocket message:", error);
       }
-    },
+    }
   },
 });
 
